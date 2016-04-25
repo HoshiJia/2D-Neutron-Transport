@@ -2,8 +2,8 @@
 # -*- coding: UTF-8 -*-
 
 # Author: Jiazhi Li
-# Date: 21 Apr 2016
-# Version: 1.8
+# Date: 23 Apr 2016
+# Version: 1.9
 # Function: 2D Monte Carlo
 # Assumption:
 #       No scattering - Only Capture(absorption and fission)
@@ -22,6 +22,10 @@
 #       Two energy groups and energy loss due to scattering
 #       Optimize periodic algorithm
 #       Implement Delta Tracking method
+#       Record Fission Sites
+#       Realize cycle iterations
+#       Evaluate K effective value of each cycle and plot the trend
+#       Expand the geometry to 3x3 pin-cells lattice
 
 from __future__ import division
 import sys
@@ -48,10 +52,15 @@ def geo_intersc(neutron):
     # if position is inside the rectangle
     circle_flag = geo_circle(p2.x,p2.y);
 
+    if neutron.energy > 1 :
+        g = 1;
+    else:
+        g = 0;
+                        
     # Delta tracking
     if r1.encloses_point(p2):
         if circle_flag == 1:
-            if random.random() < ratio_fuel_mod:
+            if random.random() < ratio_fuel_mod[g][0]:
                 neutron.flag = 1;
                 neutron.domain(1);
                 # accepted
@@ -86,8 +95,14 @@ def geo_circle(x1,y1,x0=0,y0=0,r=0.45):
 
 def new_position(neutron):
 
+    if neutron.energy > 1 :
+        g = 1;
+    else:
+        g = 0;
+
     # 0 - Delta tracking works; 1 - Delta tracking fails  
-    travel_length = -math.log(random.random()) / mod_macro_xs;
+    travel_length = -math.log(random.random()) / mod_macro_xs[g][0];
+    
     travel_length = float("{0:.6f}".format(travel_length));
 
 
@@ -104,7 +119,7 @@ def new_position(neutron):
         v = math.sin(angle);
     else:
         u_c = math.cos(angle); # collision angle in COM [0, 2*pi]
-        tan_t = math.sin(angle) / (1/neutron.iso_col.no + math.cos(angle));
+        tan_t = math.sin(angle) / (1/neutron.iso_col.mass + math.cos(angle));
         angle_real = math.atan(tan_t);
         #u_l = (1 + neutron.iso_col.no * u_c) / math.sqrt(1 + 2 * neutron.iso_col.no * u_c + neutron.iso_col.no ** 2);
         neutron.energy = neutron.energy * 1/2 * ((1 + neutron.iso_col.alpha) + (1 - neutron.iso_col.alpha) * u_c);
@@ -121,9 +136,7 @@ def new_position(neutron):
     neutron.y_next = neutron.y_rand + travel_length * v;
 
     neutron.x_next = float("{0:.6f}".format(neutron.x_next));
-    neutron.y_next = float("{0:.6f}".format(neutron.y_next));
-    #neutron.x_next = "%.3f" % neutron.x_next;
-    #neutron.y_next = "%.3f" % neutron.y_next;    
+    neutron.y_next = float("{0:.6f}".format(neutron.y_next));   
 
     return neutron;
     
@@ -174,84 +187,60 @@ def react_judge(neutron):
                 # check which reaction to happen (absorption or scattering)
                 elif neutron.flag == 1:
                     neutron.col = neutron.col + 1;
+
+                    if neutron.energy > 1 :
+                        g = 1;
+                    else:
+                        g = 0;
+                    
+                    # sample which isotope
+                    rand_iso = random.random();
                     
                     # collision happens in the fuel;
                     if neutron.cur_domain == 1:
-
-                        # scattering in fuel
-                        # sample which isotope
-                        samp = random.random();
-                        if samp <= ratio_fuel_xs[0]:
+                        if rand_iso <= ratio_fuel_xs[g][0]:
                             # reacts with u235
-                            if random.random() > u235.scat_ratio:
-                                neutron.iso_col = u235;
-                                
-                                break; # only way to jump loop - absorption
-                                # continued to supplement
-                                
-                            else:
-                                # scattering
-                                neutron.x_rand = neutron.x_next;
-                                neutron.y_rand = neutron.y_next;
-                                neutron.angle = -1;
-                                neutron.iso_col = u235;
-                                
-                        elif samp > ratio_fuel_xs[1]:
+                            neutron.iso_col = u235;
+                        elif rand_iso > ratio_fuel_xs[g][1]:
                             # reacts with pu239
-                            if random.random() > pu239.scat_ratio:
-                                neutron.iso_col = pu239;
-                                break; # only way to jump loop - absorption
-                                # continued to supplement 
-                            else:
-                                # scattering
-                                neutron.x_rand = neutron.x_next;
-                                neutron.y_rand = neutron.y_next;
-                                neutron.angle = -1;
-                                neutron.iso_col = pu239;
+                            neutron.iso_col = pu239;
                         else:
                             # reacts with u238
-                            if random.random() > u238.scat_ratio:
-                                neutron.iso_col = u238;
-                                break; # only way to jump loop - absorption
-                                # continued to supplement 
-                            else:
-                                # scattering
-                                neutron.x_rand = neutron.x_next;
-                                neutron.y_rand = neutron.y_next;
-                                neutron.angle = -1;
-                                neutron.iso_col = u238;
-                        #print neutron.iso_col;
-                    elif neutron.cur_domain == 2:
+                            neutron.iso_col = u238;
 
-                        # scattering in moderator
-                        # sample from which isotope
-                        samp = random.random();
-                        if samp <= ratio_mod_xs[0]:
-                            # reacts with H1
-                            if random.random() > h1.scat_ratio:
-                                break; # only way to jump loop - absorption
-                            else:
-                                #neutron.x_rand = N(neutron.x_next,6);
-                                #neutron.y_rand = N(neutron.y_next,6);
-                                neutron.x_rand = neutron.x_next;
-                                neutron.y_rand = neutron.y_next;
-                                neutron.angle = -1;
-                                neutron.iso_col = h1;
+                    # scattering in moderator                            
+                    elif neutron.cur_domain == 2:
+                        if rand_iso <= ratio_mod_xs[g][0]:
+                            # reacts with h1
+                            neutron.iso_col = h1;
                         else:
                             # reacts with o16
-                            if random.random() > o16.scat_ratio:
-                                break; # only way to jump loop - absorption
-                            else:
-                                #neutron.x_rand = N(neutron.x_next,6);
-                                #neutron.y_rand = N(neutron.y_next,6);
-                                neutron.x_rand = neutron.x_next;
-                                neutron.y_rand = neutron.y_next;
-                                neutron.angle = -1;
-                                neutron.iso_col = o16;
+                            neutron.iso_col = o16;
+                            
                     else:
                         print "Wrong Isotope Sampled!"
+                            
+                    rand_react = random.random();
                     
-                if neutron.col>=10:
+                    if rand_react <= neutron.iso_col.ratio_react[g][0]:
+                        # fission
+                        neutron.type = 1;
+                        break; 
+
+                    elif rand_react > neutron.iso_col.ratio_react[g][1]:
+                        # scattering
+                        neutron.type = 3;
+                        neutron.x_rand = neutron.x_next;
+                        neutron.y_rand = neutron.y_next;
+                        neutron.angle = -1;
+                    
+                    else:
+                        # absorption
+                        neutron.type = 2;
+                        break;
+
+
+                if neutron.col>=30:
                     print 'Lost tracking'
                     break; # avoid infinite loops
 
@@ -267,24 +256,34 @@ def main(neutron_cycle,cycle):
 
     
     # Fission and neutron source bank
-    neutron_bank = np.zeros((neutron_cycle,7));
+    neutron_bank = np.zeros((cycle*neutron_cycle,8));
     # [No., site_x, site_y, travel_length, velocity_angle, reaction_type, number_neutron]
+
+    rand_num = np.zeros((2,neutron_cycle),float);
     
+    for n in range(neutron_cycle):
+        rand_num[0][n] = random.uniform(-b,b);
+        rand_num[1][n] = random.uniform(-b,b);
+
+    fission_num = neutron_cycle;
     
     for i in range(cycle):
+        m = 0;
+        print rand_num;
         for j in range(neutron_cycle):
-            
-            neutron = Neutron(j,1);
-            
-            neutron_bank[j,1] = neutron.no;
 
-            x_rand = 2*b*random.random()-b;
-            y_rand = 2*b*random.random()-b;
-            #x_rand = "%.6f" % rand_num_1;
-            #y_rand = "%.6f" % rand_num_2;
+            row_num = neutron_cycle * i + j;
+            neutron = Neutron(row_num,1);
+            
+            neutron_bank[row_num,1] = neutron.no;
 
-            #x_rand = float(x_rand);
-            #y_rand = float(y_rand);
+            if j < fission_num:
+                x_rand = rand_num[0][j];
+                y_rand = rand_num[1][j];
+            else:
+                site_num = random.randint(0,fission_num-1);
+                x_rand = rand_num[0][site_num];
+                y_rand = rand_num[1][site_num];
 
             energy = 1e6; # unit: eV
             angle = -1;
@@ -292,11 +291,11 @@ def main(neutron_cycle,cycle):
             neutron_status = {'x_rand':x_rand,'y_rand':y_rand,'x_next':0,'y_next':0,'energy':1e6,'angle':-1,'iso_col':''};
             neutron.status(neutron_status);
 
+            
+            neutron_bank[row_num,2] = neutron.x_rand;
+            neutron_bank[row_num,3] = neutron.y_rand;
 
-            neutron_bank[j,2] = neutron.x_rand;
-            neutron_bank[j,3] = neutron.y_rand;
-
-
+            # print neutron_bank[row_num,2];
             # generate the first collision position
             circle_flag = geo_circle(neutron.x_rand, neutron.y_rand);
 
@@ -315,41 +314,72 @@ def main(neutron_cycle,cycle):
             
             # loop core
             react_judge(neutron);
-                
-            neutron_bank[j,4] = neutron.x_next;
-            neutron_bank[j,5] = neutron.y_next;
-            neutron_bank[j,6] = neutron.col;
+            # print neutron_bank[row_num,2];                
+            neutron_bank[row_num,4] = neutron.x_next;
+            neutron_bank[row_num,5] = neutron.y_next;
+            neutron_bank[row_num,6] = neutron.col;
+            neutron_bank[row_num,7] = neutron.type;
 
-            #if neutron.iso_col:
-            #    x= neutron.iso_col.name;
-            #else:
-            #    x= 'NaN'
+            if neutron.iso_col:
+                x= neutron.iso_col.name;
+            else:
+                x= 'NaN';
 
-            #print neutron.no, neutron.col, neutron.x_rand, neutron.y_rand, neutron.x_next, neutron.y_next, neutron.energy, x;
-            print neutron.no;
+            print neutron.no, neutron.col, neutron_bank[row_num,2], neutron_bank[row_num,3], neutron_bank[row_num,4], neutron_bank[row_num,5], neutron.energy, x, neutron.type;
+
+            # filter out fission sites
+            if neutron.type == 1:
+                rand_num[0][m] = neutron.x_next;
+                rand_num[1][m] = neutron.y_next;
+                m = m + 1;
+
+            print m;
             del neutron;
-            
-            #print n;
-            #print j, n;
+
+        print m;
+        fission_num = m;
+        fission_yield = 2.5;
+        print 'Keff = %f' % (fission_num * fission_yield / neutron_cycle);         
+
     end = time.time();
     print(end - start);
-    plt.subplot(1,2,1);
+    plt.subplot(2,2,1);
     circle1 = plt.Circle((0,0),r,alpha=0.1);
-    point1 = plt.scatter(neutron_bank[:,2], neutron_bank[:,3]);
+    point1 = plt.scatter(neutron_bank[0:neutron_cycle,2], neutron_bank[0:neutron_cycle,3]);
     fig = plt.gcf();
     fig.gca().add_artist(circle1);
     fig.gca().add_artist(point1);
-    plt.title('Neutron source');
+    plt.title('Neutron source - 1st cycle');
     plt.xlim([-b,b]);
     plt.ylim([-b,b]);
 
-    plt.subplot(1,2,2);
+    plt.subplot(2,2,2);
     circle1 = plt.Circle((0,0),r,alpha=0.1);
-    point1 = plt.scatter(neutron_bank[:,4], neutron_bank[:,5]);
+    point1 = plt.scatter(neutron_bank[0:neutron_cycle,4], neutron_bank[0:neutron_cycle,5]);
     fig = plt.gcf();
     fig.gca().add_artist(circle1);
     fig.gca().add_artist(point1);
-    plt.title('Fission site');
+    plt.title('Fission site - 1st cycle');
+    plt.xlim([-b,b]);
+    plt.ylim([-b,b]);
+
+    plt.subplot(2,2,3);
+    circle1 = plt.Circle((0,0),r,alpha=0.1);
+    point1 = plt.scatter(neutron_bank[neutron_cycle:neutron_cycle*2,2], neutron_bank[neutron_cycle:neutron_cycle*2,3]);
+    fig = plt.gcf();
+    fig.gca().add_artist(circle1);
+    fig.gca().add_artist(point1);
+    plt.title('Neutron source - 2nd cycle');
+    plt.xlim([-b,b]);
+    plt.ylim([-b,b]);
+
+    plt.subplot(2,2,4);
+    circle1 = plt.Circle((0,0),r,alpha=0.1);
+    point1 = plt.scatter(neutron_bank[neutron_cycle:neutron_cycle*2,4], neutron_bank[neutron_cycle:neutron_cycle*2,5]);
+    fig = plt.gcf();
+    fig.gca().add_artist(circle1);
+    fig.gca().add_artist(point1);
+    plt.title('Fission site - 2nd cycle');
     plt.xlim([-b,b]);
     plt.ylim([-b,b]);
     
@@ -360,24 +390,33 @@ def main(neutron_cycle,cycle):
 
 if __name__ == "__main__":
     start = time.time()
-    neutron_cycle = 2000;
-    cycle = 1;
+    neutron_cycle = 500;
+    cycle = 2;
 
     r = 0.45;
     b = 0.627;
     
-    h1 = Isotope('h1',[1,0,0.2,20],6.7358*1e22); # calculate macro cross-section
-    o16 = Isotope('o16',[16,0,0.0001,4],3.3679*1e22);
-    u235 = Isotope('u235',[235,530,99,10],9.3472*1e20);
-    u238 = Isotope('u238',[238,0.00002,2,9],2.1523*1e22);
-    pu239 = Isotope('pu239',[239,748,269,8],1*1e18);
-    
-    macro_xs = [h1.macro_xs, o16.macro_xs, u235.macro_xs, u238.macro_xs, pu239.macro_xs];
-    mod_macro_xs = np.sum(macro_xs[0:2]);
-    fuel_macro_xs = np.sum(macro_xs[2:5]);
-    ratio_mod_xs = np.cumsum(macro_xs[0:2]) / mod_macro_xs;
-    ratio_fuel_xs = np.cumsum(macro_xs[2:5]) / fuel_macro_xs;
-    ratio_fuel_mod = fuel_macro_xs / fuel_macro_xs;
+    h1 = Isotope('h1', 1, [0,0.2,20], [0,0.00004,4],6.7358*1e22); # calculate macro cross-section
+    o16 = Isotope('o16', 16, [0,0.0001,4], [0,0.00000003,3],3.3679*1e22);
+    u235 = Isotope('u235', 235, [530,99,10], [1,0.09,4],9.3472*1e20);
+    u238 = Isotope('u238', 238, [0.00002,2,9], [0.3,0.07,5],2.1523*1e22);
+    pu239 = Isotope('pu239', 239, [748,269,8], [2,0.05,5],1*1e18);
+
+    macro_xs = np.zeros((2,5),float);
+    mod_macro_xs = np.zeros((2,1),float);
+    fuel_macro_xs = np.zeros((2,1),float);
+    ratio_mod_xs = np.zeros((2,2),float);
+    ratio_fuel_xs = np.zeros((2,3),float);
+    ratio_fuel_mod = np.zeros((2,1),float);
+    for i in range(0,2):
+        macro_xs[i,] = [h1.macro_xs[i], o16.macro_xs[i], u235.macro_xs[i], u238.macro_xs[i], pu239.macro_xs[i]];
+        mod_macro_xs[i] = np.sum(macro_xs[i][0:2]);
+        fuel_macro_xs[i] = np.sum(macro_xs[i][2:5]);
+        ratio_mod_xs[i,] = np.cumsum(macro_xs[i][0:2]) / mod_macro_xs[i];
+        ratio_fuel_xs[i,] = np.cumsum(macro_xs[i][2:5]) / fuel_macro_xs[i];
+        ratio_fuel_mod[i] = fuel_macro_xs[i] / mod_macro_xs[i];
+
+    #print mod_macro_xs,fuel_macro_xs;
     
     main(neutron_cycle,cycle);
     
